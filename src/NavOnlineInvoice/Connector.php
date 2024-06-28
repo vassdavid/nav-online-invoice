@@ -2,30 +2,31 @@
 
 namespace NavOnlineInvoice;
 
+use RuntimeException;
+use SimpleXMLElement;
+use NavOnlineInvoice\Config;
 
-class Connector {
-
-    protected $config;
-
-    private $lastRequestUrl = null;
-    private $lastRequestHeader = null;
-    private $lastRequestBody = null;
-    private $lastResponseHeader = null;
-    private $lastResponseBody = null;
-    private $lastRequestId = null;
-    private $lastResponseXml = null;
+class Connector
+{
+    private ?string $lastRequestUrl = null;
+    private ?string $lastRequestHeader = null;
+    private ?string $lastRequestBody = null;
+    private ?string $lastResponseHeader = null;
+    private ?string $lastResponseBody = null;
+    private ?string $lastRequestId = null;
+    private ?SimpleXMLElement $lastResponseXml = null;
 
 
-    /**
-     *
-     * @param Config  $config
-     */
-    function __construct($config) {
+    public function __construct(
+        protected Config $config,
+    )
+    {
         $this->config = $config;
     }
 
 
-    private function resetDebugInfo() {
+    private function resetDebugInfo(): void
+    {
         $this->lastRequestUrl = null;
         $this->lastRequestHeader = null;
         $this->lastRequestBody = null;
@@ -39,9 +40,10 @@ class Connector {
     /**
      * Utolsó REST hívás adatainak lekérdezése
      *
-     * @return array
+     * @return array<string,mixed>
      */
-    public function getLastRequestData() {
+    public function getLastRequestData()
+    {
         return array(
             'requestUrl' => $this->lastRequestUrl,
             'requestHeader' => $this->lastRequestHeader,
@@ -54,28 +56,33 @@ class Connector {
     }
 
 
-    public function getLastResponseXml() {
+    public function getLastResponseXml(): ?SimpleXMLElement
+    {
         return $this->lastResponseXml;
     }
 
 
     /**
      *
-     * @param  string                   $url
-     * @param  string|\SimpleXMLElement $requestXml
+     * @param  string $url
+     * @param  string|\SimpleXMLElement|BaseRequestXml $requestXml
      * @return \SimpleXMLElement
      * @throws \NavOnlineInvoice\CurlError
      * @throws \NavOnlineInvoice\HttpResponseError
      * @throws \NavOnlineInvoice\GeneralExceptionResponse
      * @throws \NavOnlineInvoice\GeneralErrorResponse
      */
-    public function post($url, $requestXml) {
+    public function post(string $url, string|\SimpleXMLElement|BaseRequestXml $requestXml): string|\SimpleXMLElement
+    {
         $this->resetDebugInfo();
 
         $url = $this->config->baseUrl . $url;
         $this->lastRequestUrl = $url;
 
         $xmlString = is_string($requestXml) ? $requestXml : $requestXml->asXML();
+        if($xmlString === false) {
+            $xmlString = null;
+        }
         $this->lastRequestBody = $xmlString;
 
         $this->lastRequestId = $requestXml instanceof BaseRequestXml ? $requestXml->getRequestId() : null;
@@ -89,12 +96,15 @@ class Connector {
         $response = curl_exec($ch);
         $errno = curl_errno($ch);
         $info = curl_getinfo($ch);
+        if(!is_string($response)){
+            throw new CurlError($errno);
+        }
         $header = substr($response, 0, $info["header_size"]);
         $result = substr($response, $info["header_size"]);
 
         $httpStatusCode = $info["http_code"];
-
-        $this->lastRequestHeader = isset($info["request_header"]) ? $info["request_header"] : null;
+        //ignoring this line because give error the request_header not exits
+        $this->lastRequestHeader = $info["request_header"] ?? null; // @phpstan-ignore-line
         $this->lastResponseHeader = $header;
         $this->lastResponseBody = $result;
 
@@ -135,8 +145,12 @@ class Connector {
     }
 
 
-    private function getCurlHandle($url, $requestBody) {
+    private function getCurlHandle(?string $url, mixed $requestBody): \CurlHandle
+    {
         $ch = curl_init($url);
+        if($ch == false) {
+            throw new \InvalidArgumentException('Curl init failed');
+        }
 
         $headers = array(
             "Content-Type: application/xml;charset=UTF-8",
@@ -144,6 +158,9 @@ class Connector {
         );
 
         $curl_version = curl_version();
+        if ($curl_version === false) {
+            throw new \InvalidArgumentException('Curl version is not available');
+        }
 
         if (version_compare($curl_version['version'], '7.69') < 0) {
             $headers[] = "Expect:";
@@ -175,14 +192,19 @@ class Connector {
     }
 
 
-    private function parseResponse($xmlString) {
+    private function parseResponse(string $xmlString): ?SimpleXMLElement
+    {
         if (substr($xmlString, 0, 5) !== "<?xml") {
             return null;
         }
 
         $xmlString = XmlUtil::removeNamespacesFromXmlString($xmlString);
 
-        return simplexml_load_string($xmlString);
-    }
+        $xmlElement = simplexml_load_string($xmlString);
+        if($xmlElement === false) {
+            throw new RuntimeException('Cant parse response');
+        }
 
+        return $xmlElement;
+    }
 }

@@ -1,16 +1,20 @@
 <?php
 
 namespace NavOnlineInvoice;
+
 use Exception;
+use SimpleXMLElement;
 
 
-class InvoiceOperations {
+class InvoiceOperations
+{
 
     const MAX_INVOICE_COUNT = 100;
     const COMPRESSION_LEVEL = 1;
 
-    protected $invoices;
-    protected $compression;
+    /** @var array<int,mixed> **/
+    protected array $invoices;
+    protected bool $compression;
 
     /**
      * Az automatikusan felismert technicalAnnulment értéke az első hozzáadott számla alapján.
@@ -19,8 +23,8 @@ class InvoiceOperations {
      * @var bool|null
      */
     protected $detectedTechnicalAnnulment = null;
-    protected $index;
-    protected $schemaValidation = true;
+    protected int $index;
+    protected bool $schemaValidation = true;
 
 
     /**
@@ -28,7 +32,8 @@ class InvoiceOperations {
      *
      * @param boolean $compression    gzip tömörítés alkalmazása, részletek: NAV dokumentáció, 1.6.5 Tömörítés és méretkorlát
      */
-    function __construct($compression = false) {
+    function __construct(bool $compression = false)
+    {
         $this->invoices = array();
         $this->index = 1;
         $this->compression = $compression;
@@ -40,7 +45,8 @@ class InvoiceOperations {
      *
      * @param  boolean $flag
      */
-    public function useDataSchemaValidation($flag = true) {
+    public function useDataSchemaValidation(bool $flag = true): void
+    {
         $this->schemaValidation = $flag;
     }
 
@@ -49,17 +55,22 @@ class InvoiceOperations {
      * Számla ('szakmai XML') hozzáadása
      *
      * @param \SimpleXMLElement $xml       Számla adatai (szakmai XML)
-     * @param string            [$operation = "CREATE"] Számlaművelet Enum(CREATE, MODIFY, STORNO, ANNUL)
-     * @param string            [$electronicInvoiceHash = null] Számla SHA3-512 hash értéke elektronikus számla esetén. Ha completenessIndicator=true, akkor itt null-t kell átadni.
+     * @param string            $operation Számlaművelet Enum(CREATE, MODIFY, STORNO, ANNUL)
+     * @param ?string            $electronicInvoiceHash Számla SHA3-512 hash értéke elektronikus számla esetén. Ha completenessIndicator=true, akkor itt null-t kell átadni.
      * @return int                      A beszúrt művelet sorszáma (index)
      * @throws \Exception
      */
-    public function add(\SimpleXMLElement $xml, $operation = "CREATE", $electronicInvoiceHash = null) {
+    public function add(\SimpleXMLElement $xml, string $operation = "CREATE", ?string $electronicInvoiceHash = null): int
+    {
 
         // XSD validálás
         if ($this->schemaValidation) {
             $xsdFile = $operation === "ANNUL" ? Config::getAnnulmentXsdFilename() : Config::getDataXsdFilename();
-            Xsd::validate($xml->asXML(), $xsdFile);
+            $asXml = $xml->asXML();
+            if($asXml === false) {
+                throw new \InvalidArgumentException('Invalid XSD file!');
+            }
+            Xsd::validate($asXml, $xsdFile);
         }
 
         // Számlák maximum számának ellenőrzése
@@ -103,7 +114,8 @@ class InvoiceOperations {
      * @return bool       technicalAnnulment
      * @throws  Exception
      */
-    public function isTechnicalAnnulment() {
+    public function isTechnicalAnnulment(): ?bool
+    {
         if (!$this->invoices) {
             throw new Exception("Még nincs számla hozzáadva, így a technicalAnnulment értéke nem megállapítható!");
         }
@@ -112,7 +124,8 @@ class InvoiceOperations {
     }
 
 
-    protected function detectTechnicalAnnulment($operation) {
+    protected function detectTechnicalAnnulment(string $operation): void
+    {
         $currentFlag = ($operation === 'ANNUL');
 
         // Ha még nincs beállítva, akkor beállítjuk
@@ -127,7 +140,11 @@ class InvoiceOperations {
     }
 
 
-    public function getInvoices() {
+    /**
+     * @return array<int,mixed>
+     */
+    public function getInvoices(): array
+    {
         return $this->invoices;
     }
 
@@ -136,9 +153,9 @@ class InvoiceOperations {
      * Utoljára hozzáadott számla electronicInvoiceHash értékét adja vissza.
      * Ez lehet paraméterben átadott, vagy completenessIndicator=true esetén a modul által számolt hash.
      *
-     * @return string
      */
-    public function getLastInvoiceHash() {
+    public function getLastInvoiceHash(): ?string
+    {
         if (!$this->invoices) {
             return null;
         }
@@ -149,7 +166,8 @@ class InvoiceOperations {
     }
 
 
-    public function isCompressed() {
+    public function isCompressed(): bool
+    {
         return $this->compression;
     }
 
@@ -159,18 +177,26 @@ class InvoiceOperations {
      * @param \SimpleXMLElement $xml
      * @return string
      */
-    protected function convertXml(\SimpleXMLElement $xml) {
+    protected function convertXml(\SimpleXMLElement $xml): string
+    {
         $xml = $xml->asXML();
+        if($xml === false) {
+            throw new \InvalidArgumentException('Invalid xml string passed to convertXml');
+        }
 
         if ($this->compression) {
             $xml = gzencode($xml, self::COMPRESSION_LEVEL);
+            if ($xml === false) {
+                throw new \InvalidArgumentException('XML compression failed!');
+            }
         }
 
         return base64_encode($xml);
     }
 
 
-    protected function isComplete(\SimpleXMLElement $xml) {
+    protected function isComplete(\SimpleXMLElement $xml): bool
+    {
         return (string)$xml->completenessIndicator === 'true';
     }
 
@@ -184,7 +210,8 @@ class InvoiceOperations {
      * @param  boolean $compression    gzip tömörítés alkalmazása, részletek: NAV dokumentáció, 1.6.5 Tömörítés és méretkorlát
      * @return InvoiceOperations
      */
-    public static function convertFromXml($xml, $operation, $compression = false) {
+    public static function convertFromXml($xml, $operation, $compression = false): self
+    {
         $invoiceOperations = new self($compression);
         $invoiceOperations->useDataSchemaValidation();
 
@@ -198,19 +225,22 @@ class InvoiceOperations {
      * Számla dekódolása (base64 és opcionálisan gzip)
      *
      * @param  string  $base64data
-     * @param  boolean $isCompressed
-     * @return \SimpleXMLElement
+     * @param  bool $isCompressed
+     * @return SimpleXMLElement
      */
-    public static function convertToXml($base64data, $isCompressed = false) {
-        $isCompressed = ($isCompressed === true or (string)$isCompressed === 'true');
+    public static function convertToXml($base64data, bool $isCompressed = false): SimpleXMLElement|false
+    {
+        $isCompressed = $isCompressed === true;
 
         $data = base64_decode($base64data);
 
         if ($isCompressed) {
             $data = gzdecode($data);
         }
+        if($data === false) {
+            throw new \InvalidArgumentException('Decode failed!');
+        }
 
         return simplexml_load_string($data);
     }
-
 }

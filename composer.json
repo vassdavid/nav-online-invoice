@@ -1,5 +1,5 @@
 {
-    "name": "pzs/nav-online-invoice",
+    "name": "vassdavid/nav-online-invoice",
     "description": "A PHP interface for Online Invoice Data Reporting of Hungarian Tax Office (NAV)",
     "license": "MIT",
     "autoload": {
@@ -12,9 +12,11 @@
       "ext-simplexml": "*",
       "ext-openssl": "*",
       "ext-dom": "*",
-      "ext-libxml": "*"
+      "ext-libxml": "*",
+      "php": "^8.2"
     },
     "require-dev": {
-        "phpunit/phpunit": "^6"
+        "phpunit/phpunit": "^11",
+        "phpstan/phpstan": "^1.11"
     }
 }
